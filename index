@@ -1,0 +1,214 @@
+
+Perlu ada 3 Server 
+
+node1 192.168.1.62
+node2 192.168.1.65
+node3 192.168.1.68
+
+
+Install docker pada ke tiga2 Node pada setep A
+#########################
+#####Step A###############
+
+#sudo apt-get update
+ 
+#sudo apt-get install \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release
+ 
+#curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+ 
+#echo \
+  "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+ 
+#sudo apt-get update
+ 
+#sudo apt-get install docker-ce docker-ce-cli containerd.io
+ 
+#sudo docker version
+
+
+
+kemudian install docker compose
+
+#sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+ 
+#sudo chmod +x /usr/local/bin/docker-compose
+ 
+#docker-compose --version
+
+#########################
+#####End Step A###############
+
+
+
+
+Install Gluster pada ke tiga2 node Step B
+#########################
+#####Step B ###############
+
+#wget -O - https://download.gluster.org/pub/gluster/glusterfs/7/rsa.pub | apt-key add -
+ 
+ 
+#DEBID=$(grep 'VERSION_ID=' /etc/os-release | cut -d '=' -f 2 | tr -d '"')
+DEBVER=$(grep 'VERSION=' /etc/os-release | grep -Eo '[a-z]+')
+DEBARCH=$(dpkg --print-architecture)
+echo deb https://download.gluster.org/pub/gluster/glusterfs/LATEST/Debian/${DEBID}/${DEBARCH}/apt ${DEBVER} main > /etc/apt/sources.list.d/gluster.list
+ 
+#apt update
+  
+#sudo apt install glusterfs-server -y
+
+#sudo systemctl start glusterd
+#sudo systemctl enable glusterd
+#sudo systemctl status glusterd.service
+
+#####Step B End ###############
+#########################
+
+#########################
+#######Start#########
+node 1 only 
+sudo ufw allow from <node1_ip_address> to any port 24007
+#sudo ufw allow from 192.168.1.62 to any port 24007
+#sudo ufw deny 24007
+
+#######End#########
+#########################
+
+#########################
+node 2 & 3
+sudo ufw allow from <node1_ip_address> to any port 24007
+#sudo ufw allow from 192.168.1.65 to any port 24007
+#########################
+
+#########################
+##########node 1 only#########
+ 
+#sudo gluster peer probe 192.168.1.65; sudo gluster peer probe 192.168.1.68;
+#sudo gluster peer status
+#########################
+
+
+#########################
+##########To create a volume#########
+ All node
+#sudo mkdir -p /gluster/volume1
+##########End To create a volume#########
+#########################
+
+
+#########################
+##########To create a volume#########
+ node 1 only
+
+sudo gluster volume create volume_name replica number_of_servers domain1.com:/path/to/data/directory domain2.com:/path/to/data/directory force
+#sudo gluster volume create staging-gfs replica 3 192.168.1.62:/gluster/volume1 192.168.1.65:/gluster/volume1 192.168.1.68:/gluster/volume1 force
+
+#sudo gluster volume start staging-gfs
+
+##########End To create a volume#########
+#########################
+
+kalau ada masalah create volume kena detach semua 
+#sudo gluster peer detach <ip yg bermasalah>
+
+Check Volume status
+#sudo gluster volume status
+
+#########################
+#####
+run command in All nodes
+sudo ufw allow from <gluster2_ip_address> to any port 49152
+#sudo ufw allow from 192.168.1.62 to any port 49152
+#####
+#########################
+
+
+#########################
+#####
+
+run command in All nodes
+#sudo mkdir -p /mnt
+#sudo mount -t glusterfs 192.168.1.62:/staging-gfs /mnt
+or sudo mount -t glusterfs localhost:/staging-gfs /mnt
+
+#####
+########################
+
+To make sure the Gluster volume is mounted, issue the command:
+ 
+#df -h
+
+
+
+#########################
+#####
+then, to make it permanent, we will need to add it to our fstab file
+so open /etc/fstab and add this line
+#vi /etc/fstab
+localhost:/demo-v /our-application/logs/ glusterfs defaults,_netdev,acl, backupvolfile-server=<HOSTNAME> 0 0
+#localhost:/staging-gfs /mnt glusterfs defaults,_netdev,backupvolfile-server=localhost 0 0
+
+OR
+echo 'localhost:/staging-gfs /mnt glusterfs defaults,_netdev,backupvolfile-server=localhost 0 0' >> /etc/fstab
+
+#####
+########################
+
+
+Enable Docker swarm di node1
+#docker swarm init
+#docker swarm join --token SWMTKN-1-1xxxxxxxxxxxxxza8ryxxxxx9gbbs 192.168.X.45:2377
+
+Install portainer di node 1
+#curl -L https://downloads.portainer.io/portainer-agent-stack.yml -o portainer-agent-stack.yml
+#docker stack deploy -c portainer-agent-stack.yml portainer
+
+
+
+#####
+########################
+mysql yaml stack
+
+version: "3.7"
+ 
+services:
+  maindb:
+    image: mariadb
+    volumes:
+      - /mnt/mariadb3:/var/lib/mysql
+    environment:
+        - MYSQL_USER=luqman
+        - MYSQL_DATABASE=main
+        - MYSQL_PASSWORD=luqman1234
+        - MYSQL_ROOT_PASSWORD=luqman1234
+    command: ["mysqld", "--wait_timeout=28800", "--interactive_timeout=28800", "--max_allowed_packet=256M"]
+    ports:
+      - "12345:3306"
+    expose:
+      - "3306"
+    deploy:
+        placement:
+           constraints: [node.role == manager]
+        replicas: 1
+        update_config:
+            parallelism: 2
+            delay: 10s
+        restart_policy:
+            condition: on-failure
+            
+volumes:
+    mariadb:
+         driver: "local" 
+#####
+########################
+
+
+Setup PHPMYADMIN
+env 
+PMA_ARBITRARY 1
